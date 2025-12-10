@@ -8,33 +8,15 @@
 import SwiftUI
 
 struct ContentView: View {
-
-    // MARK: - State
-
-    /// 描画色
     @State private var drawingColor: Color = .red
-
-    /// タッチ中かどうか
     @State private var isTouching: Bool = false
-
-    /// リセットトリガー
     @State private var shouldReset: Bool = false
-
-    /// ステータスメッセージ
     @State private var statusMessage: String = "準備中..."
-
-    /// AR 準備完了フラグ
     @State private var isReady: Bool = false
-
-    /// カラーピッカー表示フラグ
     @State private var showColorPicker: Bool = false
-
-    // MARK: - Body
 
     var body: some View {
         ZStack {
-            // MARK: - AR ビュー（全画面）
-
             ARSceneView(
                 drawingColor: $drawingColor,
                 isTouching: $isTouching,
@@ -43,7 +25,6 @@ struct ContentView: View {
                 isReady: $isReady
             )
             .ignoresSafeArea()
-            // タッチジェスチャー
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -59,10 +40,7 @@ struct ContentView: View {
                     }
             )
 
-            // MARK: - UI オーバーレイ
-
             VStack {
-                // ステータスラベル（上部）
                 Text(statusMessage)
                     .font(.headline)
                     .foregroundColor(.white)
@@ -74,7 +52,6 @@ struct ContentView: View {
 
                 Spacer()
 
-                // ペンインジケーター（中央）
                 if isTouching {
                     Circle()
                         .fill(drawingColor)
@@ -87,9 +64,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                // コントロールパネル（下部）
                 HStack(spacing: 24) {
-                    // カラーピッカーボタン
                     Button {
                         showColorPicker.toggle()
                     } label: {
@@ -102,7 +77,6 @@ struct ContentView: View {
                             )
                     }
 
-                    // リセットボタン
                     Button {
                         shouldReset = true
                     } label: {
@@ -116,8 +90,6 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 50)
             }
-
-            // MARK: - カラーピッカーシート
 
             if showColorPicker {
                 Color.black.opacity(0.4)
@@ -135,7 +107,6 @@ struct ContentView: View {
                         .labelsHidden()
                         .scaleEffect(1.5)
 
-                    // プリセットカラー
                     HStack(spacing: 16) {
                         ForEach([Color.red, .orange, .yellow, .green, .blue, .purple], id: \.self) { color in
                             Circle()
@@ -163,10 +134,4 @@ struct ContentView: View {
             }
         }
     }
-}
-
-// MARK: - Preview
-
-#Preview {
-    ContentView()
 }
