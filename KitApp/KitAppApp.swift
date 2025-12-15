@@ -14,6 +14,6 @@ struct KitAppApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [NavRoute.self, RouteRecord.self])
+        .modelContainer(for: NavRoute.self)
     }
 }
