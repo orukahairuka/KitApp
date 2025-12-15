@@ -32,9 +32,8 @@ struct NavARSceneView: UIViewRepresentable {
     @Binding var shouldSaveRoute: Bool
     @Binding var shouldReset: Bool
     @Binding var routeToReplay: NavRoute?
-
-    var modelContext: ModelContext
-    var onRouteSaved: ((NavRoute) -> Void)?
+    @Binding var pendingSaveItems: [RouteItem]
+    @Binding var saveRequestID: UUID?
 
     func makeUIView(context: Context) -> ARSCNView {
         let sceneView = ARSCNView(frame: .zero)
@@ -70,14 +69,9 @@ struct NavARSceneView: UIViewRepresentable {
         }
 
         if shouldSaveRoute {
-            coordinator.saveRoute(modelContext: modelContext) { route in
-                DispatchQueue.main.async {
-                    onRouteSaved?(route)
-                }
-            }
+            coordinator.prepareSaveRoute()
             DispatchQueue.main.async {
                 shouldSaveRoute = false
-                navState = .idle
             }
         }
 
@@ -188,12 +182,12 @@ struct NavARSceneView: UIViewRepresentable {
             lastTurnHeading = currentHeading
         }
 
-        func saveRoute(modelContext: ModelContext, completion: @escaping (NavRoute) -> Void) {
+        func prepareSaveRoute() {
             guard isRecording,
                   let sceneView = sceneView,
                   let frame = sceneView.session.currentFrame,
                   let lastPos = lastTurnPosition else {
-                updateUI(distance: 0, angle: 0, message: "保存に失敗しました")
+                updateUI(distance: 0, angle: 0, message: "保存に失敗しました（記録を開始してください）")
                 return
             }
 
@@ -206,26 +200,24 @@ struct NavARSceneView: UIViewRepresentable {
             var angle = currentHeading - lastTurnHeading
             angle = normalizeAngle(angle)
 
-            if distance >= 0.03 {
+            // 最小距離（ノイズ除去用）
+            let minDistance: Float = 0.01
+            if distance >= minDistance {
                 recordedItems.append(RouteItem.move(distance: distance, angle: angle))
             }
 
             guard !recordedItems.isEmpty else {
-                updateUI(distance: 0, angle: 0, message: "記録がありません（歩いてください）")
+                updateUI(distance: 0, angle: 0, message: "記録がありません（少し歩いてください）")
                 return
             }
 
-            // 保存
-            let routeName = "Route_\(Date().formatted(.dateTime.month().day().hour().minute()))"
-            let route = NavRoute(name: routeName, items: recordedItems)
-            modelContext.insert(route)
-
-            do {
-                try modelContext.save()
-                updateUI(distance: 0, angle: 0, message: "保存完了: \(routeName)")
-                completion(route)
-            } catch {
-                updateUI(distance: 0, angle: 0, message: "保存エラー: \(error.localizedDescription)")
+            // ContentView に保存データを渡す
+            let itemsToSave = recordedItems
+            print("🎯 prepareSaveRoute: setting pendingSaveItems with \(itemsToSave.count) items")
+            DispatchQueue.main.async {
+                self.parent.pendingSaveItems = itemsToSave
+                self.parent.saveRequestID = UUID()  // 新しいUUIDで onChange をトリガー
+                print("🎯 pendingSaveItems set on main thread")
             }
 
             // 記録終了

@@ -32,6 +32,8 @@ struct ContentView: View {
 
     @State private var showRouteList = false
     @State private var showEventPicker = false
+    @State private var pendingSaveItems: [RouteItem] = []
+    @State private var saveRequestID: UUID?
 
     var body: some View {
         ZStack {
@@ -46,7 +48,8 @@ struct ContentView: View {
                 shouldSaveRoute: $shouldSaveRoute,
                 shouldReset: $shouldReset,
                 routeToReplay: $routeToReplay,
-                modelContext: modelContext
+                pendingSaveItems: $pendingSaveItems,
+                saveRequestID: $saveRequestID
             )
             .ignoresSafeArea()
 
@@ -67,6 +70,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showEventPicker) {
             eventPickerSheet
+        }
+        .onChange(of: saveRequestID) { _, newID in
+            guard newID != nil, !pendingSaveItems.isEmpty else { return }
+            print("📦 onChange triggered, items: \(pendingSaveItems.count)")
+            saveRoute(items: pendingSaveItems)
+            pendingSaveItems = []
+            saveRequestID = nil
         }
     }
 
@@ -324,6 +334,22 @@ struct ContentView: View {
         for index in offsets {
             modelContext.delete(savedRoutes[index])
         }
+    }
+
+    private func saveRoute(items: [RouteItem]) {
+        let routeName = "Route_\(Date().formatted(.dateTime.month().day().hour().minute()))"
+        let route = NavRoute(name: routeName, items: items)
+        modelContext.insert(route)
+
+        do {
+            try modelContext.save()
+            statusMessage = "保存完了: \(routeName)"
+            print("✅ Route saved: \(routeName), items: \(items.count)")
+        } catch {
+            statusMessage = "保存エラー: \(error.localizedDescription)"
+            print("❌ Save error: \(error)")
+        }
+        navState = .idle
     }
 
     // MARK: - Event Picker Sheet
