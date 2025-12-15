@@ -8,6 +8,7 @@
 import SwiftUI
 import ARKit
 import SceneKit
+import SwiftData
 
 /// ARSCNView を SwiftUI で表示するためのラッパー
 struct ARSceneView: UIViewRepresentable {
@@ -28,6 +29,15 @@ struct ARSceneView: UIViewRepresentable {
 
     /// 描画準備完了かどうか
     @Binding var isReady: Bool
+
+    /// 保存トリガー（true になったら現在の描画を保存）
+    @Binding var shouldSave: Bool
+
+    /// 再生するルートレコード（nil 以外で再生実行）
+    @Binding var routeToReplay: RouteRecord?
+
+    /// SwiftData の ModelContext
+    var modelContext: ModelContext
 
     // MARK: - UIViewRepresentable
 
@@ -57,6 +67,22 @@ struct ARSceneView: UIViewRepresentable {
             }
         }
 
+        // 保存処理
+        if shouldSave {
+            context.coordinator.saveCurrentDrawing(modelContext: modelContext)
+            DispatchQueue.main.async {
+                shouldSave = false
+            }
+        }
+
+        // 再生処理
+        if let route = routeToReplay {
+            context.coordinator.replayRoute(route)
+            DispatchQueue.main.async {
+                routeToReplay = nil
+            }
+        }
+
         // 色の更新
         context.coordinator.currentColor = UIColor(drawingColor)
 
@@ -77,6 +103,9 @@ struct ARSceneView: UIViewRepresentable {
         /// 描画ノードの配列
         private var drawingNodes: [DynamicGeometryNode] = []
 
+        /// 再生ノードの配列
+        private var replayNodes: [RouteReplayNode] = []
+
         /// 現在の描画色
         var currentColor: UIColor = .white
 
@@ -95,6 +124,104 @@ struct ARSceneView: UIViewRepresentable {
 
         init(_ parent: ARSceneView) {
             self.parent = parent
+        }
+
+        // MARK: - Save / Replay Methods
+
+        /// 現在の描画を保存
+        func saveCurrentDrawing(modelContext: ModelContext) {
+            guard let lastDrawing = drawingNodes.last else {
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "保存する描画がありません"
+                }
+                return
+            }
+
+            let vertices = lastDrawing.currentVertices
+            guard vertices.count >= 4 else {
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "描画が短すぎます"
+                }
+                return
+            }
+
+            // 頂点をステップに変換
+            let (steps, initialHeading) = RouteConverter.convert(from: vertices)
+
+            guard !steps.isEmpty else {
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "変換に失敗しました"
+                }
+                return
+            }
+
+            // RouteRecord を作成して保存
+            let startPointID = "Route_\(Date().formatted(.dateTime.month().day().hour().minute()))"
+            let record = RouteRecord(
+                startPointID: startPointID,
+                steps: steps,
+                initialHeading: initialHeading
+            )
+
+            modelContext.insert(record)
+
+            do {
+                try modelContext.save()
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "保存完了: \(startPointID)"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "保存エラー: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        /// ルートを再生
+        func replayRoute(_ record: RouteRecord) {
+            guard let sceneView = sceneView else { return }
+
+            // カメラの前方にルートを配置
+            guard let frame = sceneView.session.currentFrame else {
+                DispatchQueue.main.async {
+                    self.parent.statusMessage = "ARフレームが取得できません"
+                }
+                return
+            }
+
+            // カメラの位置から少し前方に配置
+            let cameraTransform = frame.camera.transform
+            let forward = SCNVector3(
+                -cameraTransform.columns.2.x,
+                -cameraTransform.columns.2.y,
+                -cameraTransform.columns.2.z
+            )
+            let cameraPosition = SCNVector3(
+                cameraTransform.columns.3.x,
+                cameraTransform.columns.3.y,
+                cameraTransform.columns.3.z
+            )
+
+            // カメラの1m前方、少し下に配置
+            let startPosition = SCNVector3(
+                cameraPosition.x + forward.x * 1.0,
+                cameraPosition.y - 0.3,
+                cameraPosition.z + forward.z * 1.0
+            )
+
+            let replayNode = RouteReplayNode(
+                record: record,
+                startPosition: startPosition,
+                lineColor: .cyan,
+                lineWidth: 0.006
+            )
+
+            sceneView.scene.rootNode.addChildNode(replayNode)
+            replayNodes.append(replayNode)
+
+            DispatchQueue.main.async {
+                self.parent.statusMessage = "再生中: \(record.startPointID)"
+            }
         }
 
         // MARK: - Drawing Methods
@@ -122,6 +249,11 @@ struct ARSceneView: UIViewRepresentable {
                 node.removeFromParentNode()
             }
             drawingNodes.removeAll()
+
+            for node in replayNodes {
+                node.removeFromParentNode()
+            }
+            replayNodes.removeAll()
         }
 
         /// 画面中央のワールド座標を取得

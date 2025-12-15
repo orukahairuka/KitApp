@@ -70,6 +70,11 @@ open class DynamicGeometryNode: SCNNode {
 
     // MARK: - Public Methods
 
+    /// 現在の頂点配列を取得（読み取り専用）
+    public var currentVertices: [SCNVector3] {
+        return vertices
+    }
+
     /// 頂点を追加する
     /// - Parameter vertice: 追加する頂点座標
     public func addVertice(_ vertice: SCNVector3) {
