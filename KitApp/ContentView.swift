@@ -35,6 +35,11 @@ struct ContentView: View {
     @State private var pendingSaveItems: [RouteItem] = []
     @State private var saveRequestID: UUID?
 
+    // WorldMap 関連
+    @State private var pendingWorldMapData: Data?
+    @State private var pendingStartAnchorID: UUID?
+    @State private var pendingStartHeading: Float = 0
+
     var body: some View {
         ZStack {
             NavARSceneView(
@@ -49,7 +54,10 @@ struct ContentView: View {
                 shouldReset: $shouldReset,
                 routeToReplay: $routeToReplay,
                 pendingSaveItems: $pendingSaveItems,
-                saveRequestID: $saveRequestID
+                saveRequestID: $saveRequestID,
+                pendingWorldMapData: $pendingWorldMapData,
+                pendingStartAnchorID: $pendingStartAnchorID,
+                pendingStartHeading: $pendingStartHeading
             )
             .ignoresSafeArea()
 
@@ -73,9 +81,17 @@ struct ContentView: View {
         }
         .onChange(of: saveRequestID) { _, newID in
             guard newID != nil, !pendingSaveItems.isEmpty else { return }
-            print("📦 onChange triggered, items: \(pendingSaveItems.count)")
-            saveRoute(items: pendingSaveItems)
+            print("📦 onChange triggered, items: \(pendingSaveItems.count), worldMap: \(pendingWorldMapData?.count ?? 0) bytes")
+            saveRoute(
+                items: pendingSaveItems,
+                worldMapData: pendingWorldMapData,
+                startAnchorID: pendingStartAnchorID,
+                startHeading: pendingStartHeading
+            )
             pendingSaveItems = []
+            pendingWorldMapData = nil
+            pendingStartAnchorID = nil
+            pendingStartHeading = 0
             saveRequestID = nil
         }
     }
@@ -336,15 +352,22 @@ struct ContentView: View {
         }
     }
 
-    private func saveRoute(items: [RouteItem]) {
+    private func saveRoute(items: [RouteItem], worldMapData: Data?, startAnchorID: UUID?, startHeading: Float) {
         let routeName = "Route_\(Date().formatted(.dateTime.month().day().hour().minute()))"
-        let route = NavRoute(name: routeName, items: items)
+        let route = NavRoute(
+            name: routeName,
+            items: items,
+            worldMapData: worldMapData,
+            startAnchorID: startAnchorID,
+            startHeading: startHeading
+        )
         modelContext.insert(route)
 
         do {
             try modelContext.save()
-            statusMessage = "保存完了: \(routeName)"
-            print("✅ Route saved: \(routeName), items: \(items.count)")
+            let mapStatus = worldMapData != nil ? "WorldMap付き" : "WorldMapなし"
+            statusMessage = "保存完了: \(routeName) (\(mapStatus))"
+            print("✅ Route saved: \(routeName), items: \(items.count), worldMap: \(worldMapData?.count ?? 0) bytes")
         } catch {
             statusMessage = "保存エラー: \(error.localizedDescription)"
             print("❌ Save error: \(error)")

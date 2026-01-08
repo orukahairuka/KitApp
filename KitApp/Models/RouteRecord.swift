@@ -117,11 +117,26 @@ final class NavRoute {
     /// 総移動距離（メートル）- 計算済みキャッシュ
     var totalDistance: Float
 
-    init(name: String, items: [RouteItem]) {
+    /// ARWorldMap データ（NSKeyedArchiver でアーカイブ）
+    /// 記録時のワールド座標系を再生時に復元するために使用
+    var worldMapData: Data? = nil
+
+    /// スタート地点のアンカー識別子
+    /// WorldMap復元後にこのアンカーを基準に3Dモデルを配置
+    var startAnchorID: UUID? = nil
+
+    /// スタート時のカメラ向き（ラジアン）
+    /// 経路再構築時の基準方向
+    var startHeading: Float = 0
+
+    init(name: String, items: [RouteItem], worldMapData: Data? = nil, startAnchorID: UUID? = nil, startHeading: Float = 0) {
         self.id = UUID()
         self.name = name
         self.createdAt = Date()
         self.itemsData = (try? JSONEncoder().encode(items)) ?? Data()
+        self.worldMapData = worldMapData
+        self.startAnchorID = startAnchorID
+        self.startHeading = startHeading
 
         // 総距離を計算
         self.totalDistance = items.reduce(0) { sum, item in

@@ -35,6 +35,11 @@ struct NavARSceneView: UIViewRepresentable {
     @Binding var pendingSaveItems: [RouteItem]
     @Binding var saveRequestID: UUID?
 
+    // WorldMap 関連
+    @Binding var pendingWorldMapData: Data?
+    @Binding var pendingStartAnchorID: UUID?
+    @Binding var pendingStartHeading: Float
+
     func makeUIView(context: Context) -> ARSCNView {
         let sceneView = ARSCNView(frame: .zero)
         sceneView.delegate = context.coordinator
@@ -118,6 +123,11 @@ struct NavARSceneView: UIViewRepresentable {
         // 再生用
         private var replayNodes: [SCNNode] = []
 
+        // WorldMap / Anchor 関連
+        private var startAnchorID: UUID?
+        private var pendingReplayRoute: NavRoute?
+        private var isRelocalizing = false
+
         init(_ parent: NavARSceneView) {
             self.parent = parent
         }
@@ -141,6 +151,13 @@ struct NavARSceneView: UIViewRepresentable {
             isRecording = true
             recordedItems = []
             trailPositions = [position]
+
+            // スタート地点に ARAnchor を追加（WorldMap 復元時に座標の基準となる）
+            let anchorID = UUID()
+            let anchor = ARAnchor(name: "start_\(anchorID.uuidString)", transform: transform)
+            sceneView.session.add(anchor: anchor)
+            startAnchorID = anchorID
+            print("📍 Start anchor added: \(anchorID)")
 
             // スタートマーカー
             let startMarker = createStartMarker(at: position)
@@ -211,17 +228,44 @@ struct NavARSceneView: UIViewRepresentable {
                 return
             }
 
-            // ContentView に保存データを渡す
-            let itemsToSave = recordedItems
-            print("🎯 prepareSaveRoute: setting pendingSaveItems with \(itemsToSave.count) items")
-            DispatchQueue.main.async {
-                self.parent.pendingSaveItems = itemsToSave
-                self.parent.saveRequestID = UUID()  // 新しいUUIDで onChange をトリガー
-                print("🎯 pendingSaveItems set on main thread")
-            }
+            updateUI(distance: 0, angle: 0, message: "WorldMap を取得中...")
 
-            // 記録終了
-            stopRecording()
+            // WorldMap を取得してから保存
+            let itemsToSave = recordedItems
+            let anchorID = startAnchorID
+            let heading = startHeading
+
+            sceneView.session.getCurrentWorldMap { [weak self] worldMap, error in
+                guard let self = self else { return }
+
+                var worldMapData: Data? = nil
+                if let worldMap = worldMap {
+                    do {
+                        worldMapData = try NSKeyedArchiver.archivedData(
+                            withRootObject: worldMap,
+                            requiringSecureCoding: true
+                        )
+                        print("🗺️ WorldMap archived: \(worldMapData?.count ?? 0) bytes, anchors: \(worldMap.anchors.count)")
+                    } catch {
+                        print("⚠️ WorldMap archive failed: \(error)")
+                    }
+                } else {
+                    print("⚠️ WorldMap not available: \(error?.localizedDescription ?? "unknown")")
+                }
+
+                // ContentView に保存データを渡す
+                DispatchQueue.main.async {
+                    self.parent.pendingSaveItems = itemsToSave
+                    self.parent.pendingWorldMapData = worldMapData
+                    self.parent.pendingStartAnchorID = anchorID
+                    self.parent.pendingStartHeading = heading
+                    self.parent.saveRequestID = UUID()
+                    print("🎯 pendingSaveItems set with WorldMap")
+                }
+
+                // 記録終了
+                self.stopRecording()
+            }
         }
 
         func stopRecording() {
@@ -229,6 +273,7 @@ struct NavARSceneView: UIViewRepresentable {
             recordedItems = []
             trailPositions = []
             lastTrailPosition = nil
+            startAnchorID = nil
 
             for node in trailNodes {
                 node.removeFromParentNode()
@@ -244,14 +289,23 @@ struct NavARSceneView: UIViewRepresentable {
             }
             replayNodes.removeAll()
 
+            // WorldMap 復元状態をリセット
+            pendingReplayRoute = nil
+            isRelocalizing = false
+
+            // 通常のセッションに戻す
+            if let sceneView = sceneView {
+                let config = ARWorldTrackingConfiguration()
+                sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+            }
+
             updateUI(distance: 0, angle: 0, message: parent.isReady ? "準備完了" : "準備中...")
         }
 
         // MARK: - Replay
 
         func replayRoute(_ route: NavRoute) {
-            guard let sceneView = sceneView,
-                  let frame = sceneView.session.currentFrame else {
+            guard let sceneView = sceneView else {
                 updateUI(distance: 0, angle: 0, message: "AR準備中...")
                 return
             }
@@ -261,6 +315,102 @@ struct NavARSceneView: UIViewRepresentable {
                 node.removeFromParentNode()
             }
             replayNodes.removeAll()
+
+            // WorldMap がある場合は復元を試みる
+            if let worldMapData = route.worldMapData,
+               let worldMap = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: worldMapData) {
+
+                print("🗺️ Restoring WorldMap with \(worldMap.anchors.count) anchors")
+
+                pendingReplayRoute = route
+                isRelocalizing = true
+
+                let config = ARWorldTrackingConfiguration()
+                config.initialWorldMap = worldMap
+                sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+
+                updateUI(distance: 0, angle: 0, message: "再ローカライズ中... カメラを動かしてください")
+                return
+            }
+
+            // WorldMap がない場合は従来の方法（カメラ前方に配置）
+            print("⚠️ No WorldMap, using fallback positioning")
+            displayRouteAtCurrentPosition(route)
+        }
+
+        /// WorldMap 復元後、アンカー位置を基準にルートを表示
+        private func displayRouteFromAnchor(_ route: NavRoute, anchorTransform: simd_float4x4) {
+            guard let sceneView = sceneView else { return }
+
+            // アンカーの位置と向きを取得
+            let anchorPos = SCNVector3(
+                anchorTransform.columns.3.x,
+                anchorTransform.columns.3.y - 0.5,  // 床付近に調整
+                anchorTransform.columns.3.z
+            )
+            let startHeading = route.startHeading
+
+            print("📍 Displaying route from anchor at (\(anchorPos.x), \(anchorPos.y), \(anchorPos.z)), heading: \(startHeading)")
+
+            // 経路を再構築
+            var positions: [SCNVector3] = [anchorPos]
+            var currentPos = anchorPos
+            var currentHeading = startHeading
+
+            for item in route.items {
+                switch item {
+                case .move(let distance, let angle):
+                    currentHeading += angle
+                    let newPos = SCNVector3(
+                        currentPos.x + sin(currentHeading) * distance,
+                        currentPos.y,
+                        currentPos.z - cos(currentHeading) * distance
+                    )
+                    positions.append(newPos)
+                    currentPos = newPos
+
+                case .event(let eventType):
+                    let eventNode = createEventNode(type: eventType, at: currentPos)
+                    sceneView.scene.rootNode.addChildNode(eventNode)
+                    replayNodes.append(eventNode)
+                }
+            }
+
+            // リボンを描画
+            if positions.count >= 2 {
+                for i in 0..<(positions.count - 1) {
+                    let ribbon = createRibbon(from: positions[i], to: positions[i + 1], color: .cyan)
+                    sceneView.scene.rootNode.addChildNode(ribbon)
+                    replayNodes.append(ribbon)
+
+                    let arrow = createArrow(from: positions[i], to: positions[i + 1])
+                    sceneView.scene.rootNode.addChildNode(arrow)
+                    replayNodes.append(arrow)
+                }
+            }
+
+            // スタートマーカー
+            let startMarker = createStartMarker(at: anchorPos)
+            sceneView.scene.rootNode.addChildNode(startMarker)
+            replayNodes.append(startMarker)
+
+            // ゴールマーカー
+            if let lastPos = positions.last {
+                let goalMarker = createGoalMarker(at: lastPos)
+                sceneView.scene.rootNode.addChildNode(goalMarker)
+                replayNodes.append(goalMarker)
+            }
+
+            updateUI(distance: 0, angle: 0, message: "再生中: \(route.name)")
+        }
+
+        /// WorldMap がない場合のフォールバック（カメラ前方に配置）
+        private func displayRouteAtCurrentPosition(_ route: NavRoute) {
+            guard let sceneView = sceneView,
+                  let frame = sceneView.session.currentFrame else {
+                updateUI(distance: 0, angle: 0, message: "AR準備中...")
+                return
+            }
 
             let transform = frame.camera.transform
             let cameraPos = SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
@@ -291,7 +441,6 @@ struct NavARSceneView: UIViewRepresentable {
                     currentPos = newPos
 
                 case .event(let eventType):
-                    // イベントノードを配置
                     let eventNode = createEventNode(type: eventType, at: currentPos)
                     sceneView.scene.rootNode.addChildNode(eventNode)
                     replayNodes.append(eventNode)
@@ -305,7 +454,6 @@ struct NavARSceneView: UIViewRepresentable {
                     sceneView.scene.rootNode.addChildNode(ribbon)
                     replayNodes.append(ribbon)
 
-                    // 矢印を追加
                     let arrow = createArrow(from: positions[i], to: positions[i + 1])
                     sceneView.scene.rootNode.addChildNode(arrow)
                     replayNodes.append(arrow)
@@ -369,12 +517,35 @@ struct NavARSceneView: UIViewRepresentable {
 
         func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
             let ready: Bool
-            let message: String
+            var message: String
 
             switch camera.trackingState {
             case .normal:
                 ready = true
                 message = "準備完了"
+
+                // リローカライズ完了時にルートを表示
+                if isRelocalizing, let route = pendingReplayRoute {
+                    isRelocalizing = false
+                    print("✅ Relocalization complete, looking for start anchor")
+
+                    // アンカーを探す
+                    if let anchorID = route.startAnchorID {
+                        let anchorName = "start_\(anchorID.uuidString)"
+                        if let anchor = session.currentFrame?.anchors.first(where: { $0.name == anchorName }) {
+                            print("📍 Found start anchor: \(anchorName)")
+                            displayRouteFromAnchor(route, anchorTransform: anchor.transform)
+                        } else {
+                            print("⚠️ Start anchor not found, using fallback")
+                            displayRouteAtCurrentPosition(route)
+                        }
+                    } else {
+                        print("⚠️ No anchor ID in route, using fallback")
+                        displayRouteAtCurrentPosition(route)
+                    }
+                    pendingReplayRoute = nil
+                }
+
             case .notAvailable:
                 ready = false
                 message = "AR利用不可"
@@ -384,14 +555,15 @@ struct NavARSceneView: UIViewRepresentable {
                 case .initializing: message = "初期化中..."
                 case .excessiveMotion: message = "動きが速すぎます"
                 case .insufficientFeatures: message = "特徴点不足"
-                case .relocalizing: message = "再ローカライズ中..."
+                case .relocalizing:
+                    message = isRelocalizing ? "再ローカライズ中... カメラを動かしてください" : "再ローカライズ中..."
                 @unknown default: message = "制限あり"
                 }
             }
 
             DispatchQueue.main.async {
                 self.parent.isReady = ready
-                if self.parent.navState == .idle {
+                if self.parent.navState == .idle || self.isRelocalizing {
                     self.parent.statusMessage = message
                 }
             }
