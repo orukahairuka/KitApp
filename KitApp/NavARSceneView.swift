@@ -110,7 +110,7 @@ struct NavARSceneView: UIViewRepresentable {
         private var startPosition: SCNVector3?
         private var startHeading: Float = 0
         private var lastTurnPosition: SCNVector3?
-        private var lastTurnHeading: Float = 0
+        private var lastMoveDirection: Float = 0  // 前のセグメントの移動方向（実際の移動ベクトルから計算）
 
         // 記録データ（Coordinator 内部で管理）
         private var recordedItems: [RouteItem] = []
@@ -145,7 +145,7 @@ struct NavARSceneView: UIViewRepresentable {
             startPosition = position
             startHeading = heading
             lastTurnPosition = position
-            lastTurnHeading = heading
+            lastMoveDirection = heading  // 最初のセグメントはカメラの向きを基準にする
             lastTrailPosition = position
 
             isRecording = true
@@ -175,13 +175,19 @@ struct NavARSceneView: UIViewRepresentable {
 
             let transform = frame.camera.transform
             let currentPos = SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-            let currentHeading = extractYaw(from: transform)
 
             let distance = distanceXZ(from: lastPos, to: currentPos)
-            var angle = currentHeading - lastTurnHeading
-            angle = normalizeAngle(angle)
 
             if distance >= 0.05 {
+                // 実際の移動ベクトルから移動方向を計算
+                let dx = currentPos.x - lastPos.x
+                let dz = currentPos.z - lastPos.z
+                let currentMoveDirection = atan2(dx, -dz)  // 実際に移動した方向
+
+                // 前のセグメントの移動方向からの相対角度
+                var angle = currentMoveDirection - lastMoveDirection
+                angle = normalizeAngle(angle)
+
                 let item = RouteItem.move(distance: distance, angle: angle)
                 recordedItems.append(item)
 
@@ -191,12 +197,12 @@ struct NavARSceneView: UIViewRepresentable {
                 trailNodes.append(turnMarker)
 
                 updateUI(distance: 0, angle: 0, message: String(format: "記録: %.2fm, %.0f°", distance, angle * 180 / .pi))
-            } else {
-                updateUI(distance: distance, angle: angle * 180 / .pi, message: "距離が短い（0.05m以上歩いてください）")
-            }
 
-            lastTurnPosition = currentPos
-            lastTurnHeading = currentHeading
+                lastTurnPosition = currentPos
+                lastMoveDirection = currentMoveDirection  // 次のセグメントの基準方向を更新
+            } else {
+                updateUI(distance: distance, angle: 0, message: "距離が短い（0.05m以上歩いてください）")
+            }
         }
 
         func prepareSaveRoute() {
@@ -211,15 +217,20 @@ struct NavARSceneView: UIViewRepresentable {
             // 最後のセグメントを追加
             let transform = frame.camera.transform
             let currentPos = SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-            let currentHeading = extractYaw(from: transform)
 
             let distance = distanceXZ(from: lastPos, to: currentPos)
-            var angle = currentHeading - lastTurnHeading
-            angle = normalizeAngle(angle)
 
             // 最小距離（ノイズ除去用）
             let minDistance: Float = 0.01
             if distance >= minDistance {
+                // 実際の移動ベクトルから移動方向を計算
+                let dx = currentPos.x - lastPos.x
+                let dz = currentPos.z - lastPos.z
+                let currentMoveDirection = atan2(dx, -dz)
+
+                var angle = currentMoveDirection - lastMoveDirection
+                angle = normalizeAngle(angle)
+
                 recordedItems.append(RouteItem.move(distance: distance, angle: angle))
             }
 
@@ -274,6 +285,7 @@ struct NavARSceneView: UIViewRepresentable {
             trailPositions = []
             lastTrailPosition = nil
             startAnchorID = nil
+            lastMoveDirection = 0
 
             for node in trailNodes {
                 node.removeFromParentNode()
@@ -348,9 +360,10 @@ struct NavARSceneView: UIViewRepresentable {
                 anchorTransform.columns.3.y - 0.5,  // 床付近に調整
                 anchorTransform.columns.3.z
             )
-            let startHeading = route.startHeading
+            // アンカーのtransformから向きを取得（WorldMap復元後の座標系に合わせる）
+            let startHeading = extractYaw(from: anchorTransform)
 
-            print("📍 Displaying route from anchor at (\(anchorPos.x), \(anchorPos.y), \(anchorPos.z)), heading: \(startHeading)")
+            print("📍 Displaying route from anchor at (\(anchorPos.x), \(anchorPos.y), \(anchorPos.z)), heading: \(startHeading) (saved: \(route.startHeading))")
 
             // 経路を再構築
             var positions: [SCNVector3] = [anchorPos]
@@ -486,12 +499,18 @@ struct NavARSceneView: UIViewRepresentable {
 
             let transform = frame.camera.transform
             let currentPos = SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-            let currentHeading = extractYaw(from: transform)
 
             // UI更新用の距離・角度
             let distance = distanceXZ(from: lastPos, to: currentPos)
-            var angle = currentHeading - lastTurnHeading
-            angle = normalizeAngle(angle)
+
+            // 現在の移動方向と前のセグメントの移動方向との差を表示
+            var angle: Float = 0
+            if distance >= 0.1 {  // ある程度移動してから角度を計算
+                let dx = currentPos.x - lastPos.x
+                let dz = currentPos.z - lastPos.z
+                let currentMoveDirection = atan2(dx, -dz)
+                angle = normalizeAngle(currentMoveDirection - lastMoveDirection)
+            }
 
             DispatchQueue.main.async {
                 self.parent.currentDistance = distance
