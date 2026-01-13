@@ -17,6 +17,9 @@ struct ContentView: View {
     // Store
     @State private var store: NavigationStore?
 
+    // ARSceneコマンド
+    @State private var arCommand: ARSceneCommand = .none
+
     // NavARSceneViewとの連携用（過渡期 - Step 3.3で削除予定）
     @State private var legacyNavState: NavState = .idle
     @State private var legacyIsReady = false
@@ -37,21 +40,24 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             NavARSceneView(
-                navState: $legacyNavState,
-                isReady: $legacyIsReady,
-                statusMessage: $legacyStatusMessage,
-                currentDistance: $legacyCurrentDistance,
-                currentAngle: $legacyCurrentAngle,
-                shouldStartRecording: $shouldStartRecording,
-                shouldRecordTurn: $shouldRecordTurn,
-                shouldSaveRoute: $shouldSaveRoute,
-                shouldReset: $shouldReset,
-                routeToReplay: $routeToReplay,
-                pendingSaveItems: $pendingSaveItems,
-                saveRequestID: $saveRequestID,
-                pendingWorldMapData: $pendingWorldMapData,
-                pendingStartAnchorID: $pendingStartAnchorID,
-                pendingStartHeading: $pendingStartHeading
+                command: $arCommand,
+                getRouteByID: { id in savedRoutes.first { $0.id == id } },
+                callback: nil,
+                legacyNavState: $legacyNavState,
+                legacyIsReady: $legacyIsReady,
+                legacyStatusMessage: $legacyStatusMessage,
+                legacyCurrentDistance: $legacyCurrentDistance,
+                legacyCurrentAngle: $legacyCurrentAngle,
+                legacyShouldStartRecording: $shouldStartRecording,
+                legacyShouldRecordTurn: $shouldRecordTurn,
+                legacyShouldSaveRoute: $shouldSaveRoute,
+                legacyShouldReset: $shouldReset,
+                legacyRouteToReplay: $routeToReplay,
+                legacyPendingSaveItems: $pendingSaveItems,
+                legacySaveRequestID: $saveRequestID,
+                legacyPendingWorldMapData: $pendingWorldMapData,
+                legacyPendingStartAnchorID: $pendingStartAnchorID,
+                legacyPendingStartHeading: $pendingStartHeading
             )
             .ignoresSafeArea()
 
