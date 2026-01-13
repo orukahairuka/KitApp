@@ -48,12 +48,32 @@ struct ContentView: View {
         }
         .sheet(isPresented: showRouteListBinding) {
             if let store = store {
-                routeListSheet(store: store)
+                RouteListSheet(
+                    routes: store.state.savedRoutes,
+                    onClose: { store.send(.setShowRouteList(false)) },
+                    onReplay: { item in
+                        store.send(.startReplay(item))
+                        store.send(.setShowRouteList(false))
+                        if let route = savedRoutes.first(where: { $0.id == item.id }) {
+                            arCommand = .replay(route: route)
+                        }
+                    },
+                    onDelete: { indexSet in
+                        store.send(.deleteRoutes(indexSet))
+                        deleteRoutesFromContext(at: indexSet)
+                    }
+                )
             }
         }
         .sheet(isPresented: showEventPickerBinding) {
             if let store = store {
-                eventPickerSheet(store: store)
+                EventPickerSheet(
+                    onSelect: { eventType in
+                        store.send(.addEvent(eventType))
+                        store.send(.setShowEventPicker(false))
+                    },
+                    onCancel: { store.send(.setShowEventPicker(false)) }
+                )
             }
         }
         .onAppear {
@@ -129,70 +149,7 @@ struct ContentView: View {
         )
     }
 
-    // MARK: - Route List Sheet
-
-    private func routeListSheet(store: NavigationStore) -> some View {
-        NavigationStack {
-            List {
-                if store.state.savedRoutes.isEmpty {
-                    Text("保存されたルートはありません")
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(store.state.savedRoutes) { item in
-                        routeRow(item: item, store: store)
-                    }
-                    .onDelete { indexSet in
-                        store.send(.deleteRoutes(indexSet))
-                        deleteRoutesFromContext(at: indexSet)
-                    }
-                }
-            }
-            .navigationTitle("保存済みルート")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("閉じる") {
-                        store.send(.setShowRouteList(false))
-                    }
-                }
-            }
-        }
-    }
-
-    private func routeRow(item: RouteListItem, store: NavigationStore) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.name)
-                    .font(.headline)
-                HStack(spacing: 12) {
-                    Label(String(format: "%.1fm", item.totalDistance), systemImage: "figure.walk")
-                    Label("\(item.moveCount)", systemImage: "arrow.right")
-                    if item.eventCount > 0 {
-                        Label("\(item.eventCount)", systemImage: "star.fill")
-                    }
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                store.send(.startReplay(item))
-                store.send(.setShowRouteList(false))
-                if let route = savedRoutes.first(where: { $0.id == item.id }) {
-                    arCommand = .replay(route: route)
-                }
-            } label: {
-                Image(systemName: "play.fill")
-                    .foregroundColor(.blue)
-                    .padding(10)
-                    .background(Color.blue.opacity(0.1))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
+    // MARK: - Helper Methods
 
     private func deleteRoutesFromContext(at offsets: IndexSet) {
         for index in offsets {
@@ -200,40 +157,5 @@ struct ContentView: View {
                 modelContext.delete(savedRoutes[index])
             }
         }
-    }
-
-    // MARK: - Event Picker Sheet
-
-    private func eventPickerSheet(store: NavigationStore) -> some View {
-        NavigationStack {
-            List {
-                ForEach(EventType.allCases, id: \.self) { eventType in
-                    Button {
-                        store.send(.addEvent(eventType))
-                        store.send(.setShowEventPicker(false))
-                    } label: {
-                        HStack {
-                            Image(systemName: eventType.iconName)
-                                .font(.title2)
-                                .foregroundColor(.purple)
-                                .frame(width: 40)
-                            Text(eventType.displayText)
-                                .foregroundColor(.primary)
-                        }
-                        .padding(.vertical, 8)
-                    }
-                }
-            }
-            .navigationTitle("イベントを追加")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("キャンセル") {
-                        store.send(.setShowEventPicker(false))
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 }
