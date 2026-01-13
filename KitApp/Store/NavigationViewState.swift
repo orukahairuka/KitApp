@@ -84,6 +84,11 @@ extension NavigationViewState {
     var canStartRecording: Bool {
         phase == .idle && isARReady
     }
+
+    /// idle状態でのステータスメッセージ
+    var idleStatusMessage: String {
+        isARReady ? "準備完了" : "準備中..."
+    }
 }
 
 // MARK: - StateColor

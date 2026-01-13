@@ -48,7 +48,7 @@ final class NavigationStore: ObservableObject {
             guard case .recording = state.phase else { return }
             state.phase = .idle
             state.recordingInfo = nil
-            state.statusMessage = state.isARReady ? "準備完了" : "準備中..."
+            state.statusMessage = state.idleStatusMessage
 
         case .saveRoute:
             guard case .recording = state.phase else { return }
@@ -68,7 +68,7 @@ final class NavigationStore: ObservableObject {
         case .stopReplay:
             guard case .replaying = state.phase else { return }
             state.phase = .idle
-            state.statusMessage = state.isARReady ? "準備完了" : "準備中..."
+            state.statusMessage = state.idleStatusMessage
 
         // MARK: Route Management Actions
 
@@ -92,7 +92,7 @@ final class NavigationStore: ObservableObject {
         case .arReadyChanged(let isReady):
             state.isARReady = isReady
             if state.phase == .idle {
-                state.statusMessage = isReady ? "準備完了" : "準備中..."
+                state.statusMessage = state.idleStatusMessage
             }
 
         case .statusMessageChanged(let message):
@@ -118,7 +118,7 @@ final class NavigationStore: ObservableObject {
             if state.phase != .idle {
                 state.phase = .idle
             }
-            state.statusMessage = state.isARReady ? "準備完了" : "準備中..."
+            state.statusMessage = state.idleStatusMessage
         }
     }
 
