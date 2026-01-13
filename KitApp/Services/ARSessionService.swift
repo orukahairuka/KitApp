@@ -414,12 +414,14 @@ final class ARSessionService: NSObject {
         lastKnownReadyState = ready
         lastKnownStatusMessage = message
 
+        print("🔄 handleTrackingStateChange: ready=\(ready), message=\(message)")
         delegate?.arSessionDidChangeReadyState(ready)
         delegate?.arSessionDidUpdateStatus(message)
     }
 
     /// 現在の状態を再通知（Store初期化後の同期用）
     func reportCurrentStatus() {
+        print("📢 reportCurrentStatus called: ready=\(lastKnownReadyState), message=\(lastKnownStatusMessage)")
         delegate?.arSessionDidChangeReadyState(lastKnownReadyState)
         delegate?.arSessionDidUpdateStatus(lastKnownStatusMessage)
     }

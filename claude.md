@@ -85,12 +85,12 @@ KitApp/
 - [x] Step 3.3: 旧 Binding の削除
 
 ### Phase 4: コンポーネント分割
-- [ ] Step 4.1: StatusBarView の抽出
-- [ ] Step 4.2: RecordingInfoView の抽出
-- [ ] Step 4.3: ControlButtonsView の抽出
-- [ ] Step 4.4: RouteListSheet の抽出
+- [x] Step 4.1: StatusBarView の抽出
+- [x] Step 4.2: RecordingInfoView の抽出
+- [x] Step 4.3: ControlButtonsView の抽出
+- [x] Step 4.4: RouteListSheet の抽出
 
 ### Phase 5: クリーンアップ
-- [ ] Step 5.1: 未使用コードの削除
-- [ ] Step 5.2: コード重複の解消
-- [ ] Step 5.3: エラーハンドリングの改善
+- [x] Step 5.1: 未使用コードの削除
+- [x] Step 5.2: コード重複の解消
+- [x] Step 5.3: エラーハンドリングの改善
