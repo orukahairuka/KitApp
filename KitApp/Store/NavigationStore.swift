@@ -20,8 +20,6 @@ final class NavigationStore: ObservableObject {
     // MARK: - Dependencies
 
     private let repository: RouteRepository?
-    // TODO: ARSessionService を追加
-    // private let arService: ARSessionService
 
     // MARK: - Initialization
 
@@ -42,28 +40,23 @@ final class NavigationStore: ObservableObject {
             state.phase = .recording
             state.recordingInfo = RecordingInfo(distance: 0, angle: 0)
             state.statusMessage = "記録中... 歩いてください"
-            // TODO: arService.startRecording()
 
         case .recordTurn:
             guard case .recording = state.phase else { return }
-            // TODO: arService.recordTurn()
 
         case .cancelRecording:
             guard case .recording = state.phase else { return }
             state.phase = .idle
             state.recordingInfo = nil
             state.statusMessage = state.isARReady ? "準備完了" : "準備中..."
-            // TODO: arService.reset()
 
         case .saveRoute:
             guard case .recording = state.phase else { return }
             state.statusMessage = "WorldMap を取得中..."
-            // TODO: arService.prepareSaveRoute()
 
         case .addEvent(let eventType):
             guard case .recording = state.phase else { return }
             state.statusMessage = eventType.displayText
-            // TODO: arService.addEvent(eventType)
 
         // MARK: Replay Actions
 
@@ -71,19 +64,15 @@ final class NavigationStore: ObservableObject {
             state.phase = .replaying(routeName: routeItem.name)
             state.showRouteList = false
             state.statusMessage = "再生準備中..."
-            // TODO: arService.replayRoute(routeItem.id)
 
         case .stopReplay:
             guard case .replaying = state.phase else { return }
             state.phase = .idle
             state.statusMessage = state.isARReady ? "準備完了" : "準備中..."
-            // TODO: arService.reset()
 
         // MARK: Route Management Actions
 
         case .deleteRoutes(let indexSet):
-            // TODO: repository.deleteRoutes(at: indexSet)
-            // 一旦ローカルで削除
             for index in indexSet.sorted().reversed() {
                 if index < state.savedRoutes.count {
                     state.savedRoutes.remove(at: index)
@@ -119,7 +108,6 @@ final class NavigationStore: ObservableObject {
                 state.phase = .idle
                 state.recordingInfo = nil
                 state.statusMessage = "保存完了: \(routeName)"
-                // TODO: repository.fetchRoutes() で savedRoutes を更新
 
             case .failure(let error):
                 state.statusMessage = error.localizedDescription
