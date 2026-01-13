@@ -19,13 +19,14 @@ final class NavigationStore: ObservableObject {
 
     // MARK: - Dependencies
 
-    // TODO: Phase 2 で追加
+    private let repository: RouteRepository?
+    // TODO: ARSessionService を追加
     // private let arService: ARSessionService
-    // private let repository: RouteRepository
 
     // MARK: - Initialization
 
-    init() {
+    init(repository: RouteRepository? = nil) {
+        self.repository = repository
         self.state = NavigationViewState()
     }
 

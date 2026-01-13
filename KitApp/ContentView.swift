@@ -8,34 +8,28 @@
 import SwiftUI
 import SwiftData
 
-enum NavState {
-    case idle
-    case recording
-    case replaying
-}
+// MARK: - ContentView
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \NavRoute.createdAt, order: .reverse) private var savedRoutes: [NavRoute]
 
-    @State private var navState: NavState = .idle
-    @State private var isReady = false
-    @State private var statusMessage = "準備中..."
-    @State private var currentDistance: Float = 0
-    @State private var currentAngle: Float = 0
+    // Store
+    @State private var store: NavigationStore?
 
+    // NavARSceneViewとの連携用（過渡期 - Step 3.3で削除予定）
+    @State private var legacyNavState: NavState = .idle
+    @State private var legacyIsReady = false
+    @State private var legacyStatusMessage = "準備中..."
+    @State private var legacyCurrentDistance: Float = 0
+    @State private var legacyCurrentAngle: Float = 0
     @State private var shouldStartRecording = false
     @State private var shouldRecordTurn = false
     @State private var shouldSaveRoute = false
     @State private var shouldReset = false
     @State private var routeToReplay: NavRoute?
-
-    @State private var showRouteList = false
-    @State private var showEventPicker = false
     @State private var pendingSaveItems: [RouteItem] = []
     @State private var saveRequestID: UUID?
-
-    // WorldMap 関連
     @State private var pendingWorldMapData: Data?
     @State private var pendingStartAnchorID: UUID?
     @State private var pendingStartHeading: Float = 0
@@ -43,11 +37,11 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             NavARSceneView(
-                navState: $navState,
-                isReady: $isReady,
-                statusMessage: $statusMessage,
-                currentDistance: $currentDistance,
-                currentAngle: $currentAngle,
+                navState: $legacyNavState,
+                isReady: $legacyIsReady,
+                statusMessage: $legacyStatusMessage,
+                currentDistance: $legacyCurrentDistance,
+                currentAngle: $legacyCurrentAngle,
                 shouldStartRecording: $shouldStartRecording,
                 shouldRecordTurn: $shouldRecordTurn,
                 shouldSaveRoute: $shouldSaveRoute,
@@ -61,49 +55,119 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            VStack {
-                statusBar
-                Spacer()
+            if let store = store {
+                VStack {
+                    statusBar(store: store)
+                    Spacer()
 
-                if navState == .recording {
-                    recordingInfo
+                    if store.state.phase == .recording {
+                        recordingInfo(store: store)
+                    }
+
+                    Spacer()
+                    controlButtons(store: store)
                 }
-
-                Spacer()
-                controlButtons
             }
         }
-        .sheet(isPresented: $showRouteList) {
-            routeListSheet
+        .sheet(isPresented: showRouteListBinding) {
+            if let store = store {
+                routeListSheet(store: store)
+            }
         }
-        .sheet(isPresented: $showEventPicker) {
-            eventPickerSheet
+        .sheet(isPresented: showEventPickerBinding) {
+            if let store = store {
+                eventPickerSheet(store: store)
+            }
+        }
+        .onAppear {
+            setupStore()
+        }
+        .onChange(of: savedRoutes) { _, newRoutes in
+            syncRoutesToStore(newRoutes)
+        }
+        .onChange(of: legacyIsReady) { _, newValue in
+            store?.send(.arReadyChanged(newValue))
+        }
+        .onChange(of: legacyStatusMessage) { _, newValue in
+            store?.send(.statusMessageChanged(newValue))
+        }
+        .onChange(of: legacyCurrentDistance) { _, _ in
+            store?.send(.recordingInfoUpdated(distance: legacyCurrentDistance, angle: legacyCurrentAngle))
         }
         .onChange(of: saveRequestID) { _, newID in
-            guard newID != nil, !pendingSaveItems.isEmpty else { return }
-            print("📦 onChange triggered, items: \(pendingSaveItems.count), worldMap: \(pendingWorldMapData?.count ?? 0) bytes")
-            saveRoute(
-                items: pendingSaveItems,
-                worldMapData: pendingWorldMapData,
-                startAnchorID: pendingStartAnchorID,
-                startHeading: pendingStartHeading
-            )
-            pendingSaveItems = []
-            pendingWorldMapData = nil
-            pendingStartAnchorID = nil
-            pendingStartHeading = 0
-            saveRequestID = nil
+            handleSaveRequest(newID)
         }
+    }
+
+    // MARK: - Setup
+
+    private func setupStore() {
+        let repository = RouteRepository(modelContext: modelContext)
+        store = NavigationStore(repository: repository)
+        syncRoutesToStore(savedRoutes)
+    }
+
+    private func syncRoutesToStore(_ routes: [NavRoute]) {
+        let items = routes.map { route in
+            RouteListItem(
+                id: route.id,
+                name: route.name,
+                totalDistance: route.totalDistance,
+                moveCount: route.moveCount,
+                eventCount: route.eventCount,
+                createdAt: route.createdAt
+            )
+        }
+        store?.loadSavedRoutes(items)
+    }
+
+    private func handleSaveRequest(_ newID: UUID?) {
+        guard newID != nil, !pendingSaveItems.isEmpty, let store = store else { return }
+
+        print("📦 onChange triggered, items: \(pendingSaveItems.count), worldMap: \(pendingWorldMapData?.count ?? 0) bytes")
+
+        let repository = RouteRepository(modelContext: modelContext)
+        let result = repository.saveRoute(
+            items: pendingSaveItems,
+            worldMapData: pendingWorldMapData,
+            startAnchorID: pendingStartAnchorID,
+            startHeading: pendingStartHeading
+        )
+
+        store.send(.routeSaveCompleted(result))
+
+        pendingSaveItems = []
+        pendingWorldMapData = nil
+        pendingStartAnchorID = nil
+        pendingStartHeading = 0
+        saveRequestID = nil
+        legacyNavState = .idle
+    }
+
+    // MARK: - Bindings
+
+    private var showRouteListBinding: Binding<Bool> {
+        Binding(
+            get: { store?.state.showRouteList ?? false },
+            set: { store?.send(.setShowRouteList($0)) }
+        )
+    }
+
+    private var showEventPickerBinding: Binding<Bool> {
+        Binding(
+            get: { store?.state.showEventPicker ?? false },
+            set: { store?.send(.setShowEventPicker($0)) }
+        )
     }
 
     // MARK: - Status Bar
 
-    private var statusBar: some View {
+    private func statusBar(store: NavigationStore) -> some View {
         HStack {
             Circle()
-                .fill(stateColor)
+                .fill(stateColor(for: store.state))
                 .frame(width: 12, height: 12)
-            Text(statusMessage)
+            Text(store.state.statusMessage)
                 .font(.headline)
                 .foregroundColor(.white)
         }
@@ -114,9 +178,10 @@ struct ContentView: View {
         .padding(.top, 60)
     }
 
-    private var stateColor: Color {
-        switch navState {
-        case .idle: return isReady ? .green : .orange
+    private func stateColor(for state: NavigationViewState) -> Color {
+        switch state.stateColor {
+        case .preparing: return .orange
+        case .ready: return .green
         case .recording: return .red
         case .replaying: return .blue
         }
@@ -124,12 +189,14 @@ struct ContentView: View {
 
     // MARK: - Recording Info
 
-    private var recordingInfo: some View {
-        VStack(spacing: 12) {
+    private func recordingInfo(store: NavigationStore) -> some View {
+        let info = store.state.recordingInfo ?? RecordingInfo(distance: 0, angle: 0)
+
+        return VStack(spacing: 12) {
             HStack {
                 Image(systemName: "figure.walk")
                     .font(.title2)
-                Text(String(format: "%.2f m", currentDistance))
+                Text(String(format: "%.2f m", info.distance))
                     .font(.system(size: 32, weight: .bold, design: .monospaced))
             }
             .foregroundColor(.white)
@@ -137,7 +204,7 @@ struct ContentView: View {
             HStack {
                 Image(systemName: "arrow.triangle.turn.up.right.circle")
                     .font(.title3)
-                Text(String(format: "%.1f°", currentAngle))
+                Text(String(format: "%.1f°", info.angle))
                     .font(.system(size: 24, weight: .medium, design: .monospaced))
             }
             .foregroundColor(.white.opacity(0.8))
@@ -149,25 +216,27 @@ struct ContentView: View {
 
     // MARK: - Control Buttons
 
-    private var controlButtons: some View {
+    private func controlButtons(store: NavigationStore) -> some View {
         VStack(spacing: 16) {
-            switch navState {
+            switch store.state.phase {
             case .idle:
-                idleButtons
+                idleButtons(store: store)
             case .recording:
-                recordingButtons
+                recordingButtons(store: store)
             case .replaying:
-                replayingButtons
+                replayingButtons(store: store)
             }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 50)
     }
 
-    private var idleButtons: some View {
+    private func idleButtons(store: NavigationStore) -> some View {
         HStack(spacing: 20) {
             Button {
+                store.send(.startRecording)
                 shouldStartRecording = true
+                legacyNavState = .recording
             } label: {
                 HStack {
                     Image(systemName: "record.circle")
@@ -177,13 +246,13 @@ struct ContentView: View {
                 .foregroundColor(.white)
                 .frame(height: 50)
                 .frame(maxWidth: .infinity)
-                .background(isReady ? Color.red : Color.gray)
+                .background(store.state.canStartRecording ? Color.red : Color.gray)
                 .cornerRadius(12)
             }
-            .disabled(!isReady)
+            .disabled(!store.state.canStartRecording)
 
             Button {
-                showRouteList = true
+                store.send(.setShowRouteList(true))
             } label: {
                 ZStack {
                     Image(systemName: "list.bullet")
@@ -193,8 +262,8 @@ struct ContentView: View {
                         .background(Color.blue)
                         .cornerRadius(12)
 
-                    if !savedRoutes.isEmpty {
-                        Text("\(savedRoutes.count)")
+                    if !store.state.savedRoutes.isEmpty {
+                        Text("\(store.state.savedRoutes.count)")
                             .font(.caption2)
                             .fontWeight(.bold)
                             .foregroundColor(.white)
@@ -208,10 +277,11 @@ struct ContentView: View {
         }
     }
 
-    private var recordingButtons: some View {
+    private func recordingButtons(store: NavigationStore) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Button {
+                    store.send(.recordTurn)
                     shouldRecordTurn = true
                 } label: {
                     VStack(spacing: 4) {
@@ -227,7 +297,7 @@ struct ContentView: View {
                 }
 
                 Button {
-                    showEventPicker = true
+                    store.send(.setShowEventPicker(true))
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "stairs")
@@ -242,6 +312,7 @@ struct ContentView: View {
                 }
 
                 Button {
+                    store.send(.saveRoute)
                     shouldSaveRoute = true
                 } label: {
                     VStack(spacing: 4) {
@@ -258,8 +329,9 @@ struct ContentView: View {
             }
 
             Button {
+                store.send(.cancelRecording)
                 shouldReset = true
-                navState = .idle
+                legacyNavState = .idle
             } label: {
                 Text("キャンセル")
                     .font(.subheadline)
@@ -272,10 +344,11 @@ struct ContentView: View {
         }
     }
 
-    private var replayingButtons: some View {
+    private func replayingButtons(store: NavigationStore) -> some View {
         Button {
+            store.send(.stopReplay)
             shouldReset = true
-            navState = .idle
+            legacyNavState = .idle
         } label: {
             HStack {
                 Image(systemName: "stop.fill")
@@ -292,46 +365,20 @@ struct ContentView: View {
 
     // MARK: - Route List Sheet
 
-    private var routeListSheet: some View {
+    private func routeListSheet(store: NavigationStore) -> some View {
         NavigationStack {
             List {
-                if savedRoutes.isEmpty {
+                if store.state.savedRoutes.isEmpty {
                     Text("保存されたルートはありません")
                         .foregroundColor(.secondary)
                 } else {
-                    ForEach(savedRoutes) { route in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(route.name)
-                                    .font(.headline)
-                                HStack(spacing: 12) {
-                                    Label(String(format: "%.1fm", route.totalDistance), systemImage: "figure.walk")
-                                    Label("\(route.moveCount)", systemImage: "arrow.right")
-                                    if route.eventCount > 0 {
-                                        Label("\(route.eventCount)", systemImage: "star.fill")
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            }
-
-                            Spacer()
-
-                            Button {
-                                routeToReplay = route
-                                navState = .replaying
-                                showRouteList = false
-                            } label: {
-                                Image(systemName: "play.fill")
-                                    .foregroundColor(.blue)
-                                    .padding(10)
-                                    .background(Color.blue.opacity(0.1))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    ForEach(store.state.savedRoutes) { item in
+                        routeRow(item: item, store: store)
                     }
-                    .onDelete(perform: deleteRoutes)
+                    .onDelete { indexSet in
+                        store.send(.deleteRoutes(indexSet))
+                        deleteRoutesFromContext(at: indexSet)
+                    }
                 }
             }
             .navigationTitle("保存済みルート")
@@ -339,52 +386,66 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("閉じる") {
-                        showRouteList = false
+                        store.send(.setShowRouteList(false))
                     }
                 }
             }
         }
     }
 
-    private func deleteRoutes(at offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(savedRoutes[index])
+    private func routeRow(item: RouteListItem, store: NavigationStore) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name)
+                    .font(.headline)
+                HStack(spacing: 12) {
+                    Label(String(format: "%.1fm", item.totalDistance), systemImage: "figure.walk")
+                    Label("\(item.moveCount)", systemImage: "arrow.right")
+                    if item.eventCount > 0 {
+                        Label("\(item.eventCount)", systemImage: "star.fill")
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                store.send(.startReplay(item))
+                // レガシー連携
+                if let route = savedRoutes.first(where: { $0.id == item.id }) {
+                    routeToReplay = route
+                    legacyNavState = .replaying
+                }
+            } label: {
+                Image(systemName: "play.fill")
+                    .foregroundColor(.blue)
+                    .padding(10)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func saveRoute(items: [RouteItem], worldMapData: Data?, startAnchorID: UUID?, startHeading: Float) {
-        let routeName = "Route_\(Date().formatted(.dateTime.month().day().hour().minute()))"
-        let route = NavRoute(
-            name: routeName,
-            items: items,
-            worldMapData: worldMapData,
-            startAnchorID: startAnchorID,
-            startHeading: startHeading
-        )
-        modelContext.insert(route)
-
-        do {
-            try modelContext.save()
-            let mapStatus = worldMapData != nil ? "WorldMap付き" : "WorldMapなし"
-            statusMessage = "保存完了: \(routeName) (\(mapStatus))"
-            print("✅ Route saved: \(routeName), items: \(items.count), worldMap: \(worldMapData?.count ?? 0) bytes")
-        } catch {
-            statusMessage = "保存エラー: \(error.localizedDescription)"
-            print("❌ Save error: \(error)")
+    private func deleteRoutesFromContext(at offsets: IndexSet) {
+        for index in offsets {
+            if index < savedRoutes.count {
+                modelContext.delete(savedRoutes[index])
+            }
         }
-        navState = .idle
     }
 
     // MARK: - Event Picker Sheet
 
-    private var eventPickerSheet: some View {
+    private func eventPickerSheet(store: NavigationStore) -> some View {
         NavigationStack {
             List {
                 ForEach(EventType.allCases, id: \.self) { eventType in
                     Button {
-                        // イベントを追加（将来的にはCoordinatorに直接追加）
-                        showEventPicker = false
-                        statusMessage = eventType.displayText
+                        store.send(.addEvent(eventType))
+                        store.send(.setShowEventPicker(false))
                     } label: {
                         HStack {
                             Image(systemName: eventType.iconName)
@@ -403,11 +464,19 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("キャンセル") {
-                        showEventPicker = false
+                        store.send(.setShowEventPicker(false))
                     }
                 }
             }
         }
         .presentationDetents([.medium])
     }
+}
+
+// MARK: - Legacy NavState (過渡期)
+
+enum NavState {
+    case idle
+    case recording
+    case replaying
 }
