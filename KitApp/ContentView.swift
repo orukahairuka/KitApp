@@ -30,7 +30,7 @@ struct ContentView: View {
 
             if let store = store {
                 VStack {
-                    statusBar(store: store)
+                    StatusBarView(state: store.state)
                     Spacer()
 
                     if store.state.phase == .recording {
@@ -123,33 +123,6 @@ struct ContentView: View {
             get: { store?.state.showEventPicker ?? false },
             set: { store?.send(.setShowEventPicker($0)) }
         )
-    }
-
-    // MARK: - Status Bar
-
-    private func statusBar(store: NavigationStore) -> some View {
-        HStack {
-            Circle()
-                .fill(stateColor(for: store.state))
-                .frame(width: 12, height: 12)
-            Text(store.state.statusMessage)
-                .font(.headline)
-                .foregroundColor(.white)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.7))
-        .cornerRadius(20)
-        .padding(.top, 60)
-    }
-
-    private func stateColor(for state: NavigationViewState) -> Color {
-        switch state.stateColor {
-        case .preparing: return .orange
-        case .ready: return .green
-        case .recording: return .red
-        case .replaying: return .blue
-        }
     }
 
     // MARK: - Recording Info
