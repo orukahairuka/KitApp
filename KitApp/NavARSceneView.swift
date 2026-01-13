@@ -19,6 +19,7 @@ enum ARSceneCommand: Equatable {
     case saveRoute
     case reset
     case replay(route: NavRoute)
+    case requestCurrentStatus
 
     static func == (lhs: ARSceneCommand, rhs: ARSceneCommand) -> Bool {
         switch (lhs, rhs) {
@@ -26,7 +27,8 @@ enum ARSceneCommand: Equatable {
              (.startRecording, .startRecording),
              (.recordTurn, .recordTurn),
              (.saveRoute, .saveRoute),
-             (.reset, .reset):
+             (.reset, .reset),
+             (.requestCurrentStatus, .requestCurrentStatus):
             return true
         case (.replay(let l), .replay(let r)):
             return l.id == r.id
@@ -92,6 +94,9 @@ struct NavARSceneView: UIViewRepresentable {
         case .replay(let route):
             coordinator.replayRoute(route)
             DispatchQueue.main.async { command = .none }
+        case .requestCurrentStatus:
+            coordinator.requestCurrentStatus()
+            DispatchQueue.main.async { command = .none }
         }
     }
 
@@ -135,6 +140,14 @@ struct NavARSceneView: UIViewRepresentable {
         func replayRoute(_ route: NavRoute) {
             arService.sceneView = sceneView
             arService.replayRoute(route)
+        }
+
+        func requestCurrentStatus() {
+            guard let sceneView = sceneView,
+                  let camera = sceneView.session.currentFrame?.camera else {
+                return
+            }
+            arService.handleTrackingStateChange(camera, session: sceneView.session)
         }
 
         // MARK: - ARSCNViewDelegate

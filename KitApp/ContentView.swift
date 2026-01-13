@@ -90,6 +90,8 @@ struct ContentView: View {
         let repository = RouteRepository(modelContext: modelContext)
         store = NavigationStore(repository: repository)
         syncRoutesToStore(savedRoutes)
+        // Store初期化後にARの現在状態を要求（初期化前のイベントが失われた場合の対策）
+        arCommand = .requestCurrentStatus
     }
 
     private func syncRoutesToStore(_ routes: [NavRoute]) {
