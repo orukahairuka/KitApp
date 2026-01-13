@@ -76,8 +76,8 @@ KitApp/
 
 ### Phase 2: サービス層の抽出
 - [x] Step 2.1: NavigationConfig の作成（マジックナンバー集約）
-- [ ] Step 2.2: RouteRepository の作成（データ永続化）
-- [ ] Step 2.3: ARSessionService の作成（AR操作の抽出）
+- [x] Step 2.2: RouteRepository の作成（データ永続化）
+- [x] Step 2.3: ARSessionService の作成（AR操作の抽出）
 
 ### Phase 3: View のリファクタリング
 - [ ] Step 3.1: ContentView を Store に接続
