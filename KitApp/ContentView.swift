@@ -34,7 +34,7 @@ struct ContentView: View {
                     Spacer()
 
                     if store.state.phase == .recording {
-                        recordingInfo(store: store)
+                        RecordingInfoView(info: store.state.recordingInfo)
                     }
 
                     Spacer()
@@ -123,33 +123,6 @@ struct ContentView: View {
             get: { store?.state.showEventPicker ?? false },
             set: { store?.send(.setShowEventPicker($0)) }
         )
-    }
-
-    // MARK: - Recording Info
-
-    private func recordingInfo(store: NavigationStore) -> some View {
-        let info = store.state.recordingInfo ?? RecordingInfo(distance: 0, angle: 0)
-
-        return VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "figure.walk")
-                    .font(.title2)
-                Text(String(format: "%.2f m", info.distance))
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
-            }
-            .foregroundColor(.white)
-
-            HStack {
-                Image(systemName: "arrow.triangle.turn.up.right.circle")
-                    .font(.title3)
-                Text(String(format: "%.1f°", info.angle))
-                    .font(.system(size: 24, weight: .medium, design: .monospaced))
-            }
-            .foregroundColor(.white.opacity(0.8))
-        }
-        .padding(20)
-        .background(Color.black.opacity(0.6))
-        .cornerRadius(16)
     }
 
     // MARK: - Control Buttons
