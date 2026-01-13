@@ -71,7 +71,7 @@ enum NavigationAction {
 // MARK: - NavigationError
 
 /// ナビゲーション関連のエラー
-enum NavigationError: Error, Equatable {
+enum NavigationError: LocalizedError, Equatable {
     /// 記録データがない
     case noRecordingData
 
@@ -84,7 +84,13 @@ enum NavigationError: Error, Equatable {
     /// ARセッションが準備できていない
     case arSessionNotReady
 
-    var localizedDescription: String {
+    /// データ取得に失敗
+    case fetchFailed(String)
+
+    /// 削除に失敗
+    case deleteFailed(String)
+
+    var errorDescription: String? {
         switch self {
         case .noRecordingData:
             return "記録データがありません"
@@ -94,6 +100,10 @@ enum NavigationError: Error, Equatable {
             return "保存エラー: \(message)"
         case .arSessionNotReady:
             return "ARセッションが準備できていません"
+        case .fetchFailed(let message):
+            return "取得エラー: \(message)"
+        case .deleteFailed(let message):
+            return "削除エラー: \(message)"
         }
     }
 }
