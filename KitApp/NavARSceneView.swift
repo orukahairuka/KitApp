@@ -143,11 +143,7 @@ struct NavARSceneView: UIViewRepresentable {
         }
 
         func requestCurrentStatus() {
-            guard let sceneView = sceneView,
-                  let camera = sceneView.session.currentFrame?.camera else {
-                return
-            }
-            arService.handleTrackingStateChange(camera, session: sceneView.session)
+            arService.reportCurrentStatus()
         }
 
         // MARK: - ARSCNViewDelegate

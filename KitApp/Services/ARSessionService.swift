@@ -59,6 +59,10 @@ final class ARSessionService: NSObject {
     private var pendingReplayRoute: NavRoute?
     private var isRelocalizing = false
 
+    // 最後の状態（requestCurrentStatus用）
+    private(set) var lastKnownReadyState: Bool = false
+    private(set) var lastKnownStatusMessage: String = "準備中..."
+
     // MARK: - Recording
 
     /// 記録を開始
@@ -406,8 +410,18 @@ final class ARSessionService: NSObject {
             }
         }
 
+        // 状態を保存
+        lastKnownReadyState = ready
+        lastKnownStatusMessage = message
+
         delegate?.arSessionDidChangeReadyState(ready)
         delegate?.arSessionDidUpdateStatus(message)
+    }
+
+    /// 現在の状態を再通知（Store初期化後の同期用）
+    func reportCurrentStatus() {
+        delegate?.arSessionDidChangeReadyState(lastKnownReadyState)
+        delegate?.arSessionDidUpdateStatus(lastKnownStatusMessage)
     }
 
     /// フレーム更新時の処理（記録中）
