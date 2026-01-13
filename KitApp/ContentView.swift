@@ -20,44 +20,11 @@ struct ContentView: View {
     // ARSceneコマンド
     @State private var arCommand: ARSceneCommand = .none
 
-    // NavARSceneViewとの連携用（過渡期 - Step 3.3で削除予定）
-    @State private var legacyNavState: NavState = .idle
-    @State private var legacyIsReady = false
-    @State private var legacyStatusMessage = "準備中..."
-    @State private var legacyCurrentDistance: Float = 0
-    @State private var legacyCurrentAngle: Float = 0
-    @State private var shouldStartRecording = false
-    @State private var shouldRecordTurn = false
-    @State private var shouldSaveRoute = false
-    @State private var shouldReset = false
-    @State private var routeToReplay: NavRoute?
-    @State private var pendingSaveItems: [RouteItem] = []
-    @State private var saveRequestID: UUID?
-    @State private var pendingWorldMapData: Data?
-    @State private var pendingStartAnchorID: UUID?
-    @State private var pendingStartHeading: Float = 0
-
     var body: some View {
         ZStack {
             NavARSceneView(
                 command: $arCommand,
-                getRouteByID: { id in savedRoutes.first { $0.id == id } },
-                callback: nil,
-                legacyNavState: $legacyNavState,
-                legacyIsReady: $legacyIsReady,
-                legacyStatusMessage: $legacyStatusMessage,
-                legacyCurrentDistance: $legacyCurrentDistance,
-                legacyCurrentAngle: $legacyCurrentAngle,
-                legacyShouldStartRecording: $shouldStartRecording,
-                legacyShouldRecordTurn: $shouldRecordTurn,
-                legacyShouldSaveRoute: $shouldSaveRoute,
-                legacyShouldReset: $shouldReset,
-                legacyRouteToReplay: $routeToReplay,
-                legacyPendingSaveItems: $pendingSaveItems,
-                legacySaveRequestID: $saveRequestID,
-                legacyPendingWorldMapData: $pendingWorldMapData,
-                legacyPendingStartAnchorID: $pendingStartAnchorID,
-                legacyPendingStartHeading: $pendingStartHeading
+                onEvent: handleARSceneEvent
             )
             .ignoresSafeArea()
 
@@ -91,18 +58,6 @@ struct ContentView: View {
         .onChange(of: savedRoutes) { _, newRoutes in
             syncRoutesToStore(newRoutes)
         }
-        .onChange(of: legacyIsReady) { _, newValue in
-            store?.send(.arReadyChanged(newValue))
-        }
-        .onChange(of: legacyStatusMessage) { _, newValue in
-            store?.send(.statusMessageChanged(newValue))
-        }
-        .onChange(of: legacyCurrentDistance) { _, _ in
-            store?.send(.recordingInfoUpdated(distance: legacyCurrentDistance, angle: legacyCurrentAngle))
-        }
-        .onChange(of: saveRequestID) { _, newID in
-            handleSaveRequest(newID)
-        }
     }
 
     // MARK: - Setup
@@ -127,27 +82,31 @@ struct ContentView: View {
         store?.loadSavedRoutes(items)
     }
 
-    private func handleSaveRequest(_ newID: UUID?) {
-        guard newID != nil, !pendingSaveItems.isEmpty, let store = store else { return }
+    // MARK: - AR Scene Event Handler
 
-        print("📦 onChange triggered, items: \(pendingSaveItems.count), worldMap: \(pendingWorldMapData?.count ?? 0) bytes")
+    private func handleARSceneEvent(_ event: ARSceneEvent) {
+        guard let store = store else { return }
 
-        let repository = RouteRepository(modelContext: modelContext)
-        let result = repository.saveRoute(
-            items: pendingSaveItems,
-            worldMapData: pendingWorldMapData,
-            startAnchorID: pendingStartAnchorID,
-            startHeading: pendingStartHeading
-        )
+        switch event {
+        case .readyChanged(let isReady):
+            store.send(.arReadyChanged(isReady))
 
-        store.send(.routeSaveCompleted(result))
+        case .statusChanged(let message):
+            store.send(.statusMessageChanged(message))
 
-        pendingSaveItems = []
-        pendingWorldMapData = nil
-        pendingStartAnchorID = nil
-        pendingStartHeading = 0
-        saveRequestID = nil
-        legacyNavState = .idle
+        case .recordingInfoUpdated(let distance, let angle):
+            store.send(.recordingInfoUpdated(distance: distance, angle: angle))
+
+        case .saveDataReady(let items, let worldMapData, let startAnchorID, let startHeading):
+            let repository = RouteRepository(modelContext: modelContext)
+            let result = repository.saveRoute(
+                items: items,
+                worldMapData: worldMapData,
+                startAnchorID: startAnchorID,
+                startHeading: startHeading
+            )
+            store.send(.routeSaveCompleted(result))
+        }
     }
 
     // MARK: - Bindings
@@ -241,8 +200,7 @@ struct ContentView: View {
         HStack(spacing: 20) {
             Button {
                 store.send(.startRecording)
-                shouldStartRecording = true
-                legacyNavState = .recording
+                arCommand = .startRecording
             } label: {
                 HStack {
                     Image(systemName: "record.circle")
@@ -288,7 +246,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Button {
                     store.send(.recordTurn)
-                    shouldRecordTurn = true
+                    arCommand = .recordTurn
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.turn.up.right")
@@ -319,7 +277,7 @@ struct ContentView: View {
 
                 Button {
                     store.send(.saveRoute)
-                    shouldSaveRoute = true
+                    arCommand = .saveRoute
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
@@ -336,8 +294,7 @@ struct ContentView: View {
 
             Button {
                 store.send(.cancelRecording)
-                shouldReset = true
-                legacyNavState = .idle
+                arCommand = .reset
             } label: {
                 Text("キャンセル")
                     .font(.subheadline)
@@ -353,8 +310,7 @@ struct ContentView: View {
     private func replayingButtons(store: NavigationStore) -> some View {
         Button {
             store.send(.stopReplay)
-            shouldReset = true
-            legacyNavState = .idle
+            arCommand = .reset
         } label: {
             HStack {
                 Image(systemName: "stop.fill")
@@ -419,10 +375,9 @@ struct ContentView: View {
 
             Button {
                 store.send(.startReplay(item))
-                // レガシー連携
+                store.send(.setShowRouteList(false))
                 if let route = savedRoutes.first(where: { $0.id == item.id }) {
-                    routeToReplay = route
-                    legacyNavState = .replaying
+                    arCommand = .replay(route: route)
                 }
             } label: {
                 Image(systemName: "play.fill")
@@ -477,12 +432,4 @@ struct ContentView: View {
         }
         .presentationDetents([.medium])
     }
-}
-
-// MARK: - Legacy NavState (過渡期)
-
-enum NavState {
-    case idle
-    case recording
-    case replaying
 }

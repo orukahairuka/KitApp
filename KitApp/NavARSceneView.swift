@@ -4,14 +4,6 @@
 //
 //  歩行ナビプロトタイプ用の AR View
 //
-//  【距離の計算方法】
-//  - ARKit のカメラ位置（ワールド座標）を毎フレーム取得
-//  - 「曲がる」ボタン押下時に、前回の曲がり地点からの距離を記録
-//
-//  【角度の計算方法】
-//  - スタート時のカメラ forward 方向を基準（0°）として記録
-//  - 「曲がる」ボタン押下時に、前回の向きからの相対角度を記録
-//
 
 import SwiftUI
 import ARKit
@@ -26,53 +18,43 @@ enum ARSceneCommand: Equatable {
     case recordTurn
     case saveRoute
     case reset
-    case replay(routeID: UUID)
+    case replay(route: NavRoute)
+
+    static func == (lhs: ARSceneCommand, rhs: ARSceneCommand) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none),
+             (.startRecording, .startRecording),
+             (.recordTurn, .recordTurn),
+             (.saveRoute, .saveRoute),
+             (.reset, .reset):
+            return true
+        case (.replay(let l), .replay(let r)):
+            return l.id == r.id
+        default:
+            return false
+        }
+    }
 }
 
-// MARK: - ARSceneCallback
+// MARK: - ARSceneEvent
 
-/// ARSceneViewからのコールバック
-protocol ARSceneCallback: AnyObject {
-    func arSceneDidChangeReadyState(_ isReady: Bool)
-    func arSceneDidUpdateStatus(_ message: String)
-    func arSceneDidUpdateRecordingInfo(distance: Float, angle: Float)
-    func arSceneDidPrepareSaveData(
-        items: [RouteItem],
-        worldMapData: Data?,
-        startAnchorID: UUID?,
-        startHeading: Float
-    )
+/// ARSceneViewから発生するイベント
+enum ARSceneEvent {
+    case readyChanged(Bool)
+    case statusChanged(String)
+    case recordingInfoUpdated(distance: Float, angle: Float)
+    case saveDataReady(items: [RouteItem], worldMapData: Data?, startAnchorID: UUID?, startHeading: Float)
 }
 
 // MARK: - NavARSceneView
 
 struct NavARSceneView: UIViewRepresentable {
 
-    // コマンドベースのインターフェース
+    /// ARSceneに送るコマンド
     @Binding var command: ARSceneCommand
 
-    // ルート再生用（IDからNavRouteを取得するためのクロージャ）
-    var getRouteByID: ((UUID) -> NavRoute?)?
-
-    // コールバック
-    weak var callback: ARSceneCallback?
-
-    // レガシーBinding（過渡期 - Step 3.3で削除予定）
-    @Binding var legacyNavState: NavState
-    @Binding var legacyIsReady: Bool
-    @Binding var legacyStatusMessage: String
-    @Binding var legacyCurrentDistance: Float
-    @Binding var legacyCurrentAngle: Float
-    @Binding var legacyShouldStartRecording: Bool
-    @Binding var legacyShouldRecordTurn: Bool
-    @Binding var legacyShouldSaveRoute: Bool
-    @Binding var legacyShouldReset: Bool
-    @Binding var legacyRouteToReplay: NavRoute?
-    @Binding var legacyPendingSaveItems: [RouteItem]
-    @Binding var legacySaveRequestID: UUID?
-    @Binding var legacyPendingWorldMapData: Data?
-    @Binding var legacyPendingStartAnchorID: UUID?
-    @Binding var legacyPendingStartHeading: Float
+    /// ARSceneからのイベントを受け取るハンドラ
+    var onEvent: ((ARSceneEvent) -> Void)?
 
     func makeUIView(context: Context) -> ARSCNView {
         let sceneView = ARSCNView(frame: .zero)
@@ -92,7 +74,6 @@ struct NavARSceneView: UIViewRepresentable {
     func updateUIView(_ sceneView: ARSCNView, context: Context) {
         let coordinator = context.coordinator
 
-        // 新しいコマンドベースの処理
         switch command {
         case .none:
             break
@@ -108,48 +89,9 @@ struct NavARSceneView: UIViewRepresentable {
         case .reset:
             coordinator.reset()
             DispatchQueue.main.async { command = .none }
-        case .replay(let routeID):
-            if let route = getRouteByID?(routeID) {
-                coordinator.replayRoute(route)
-            }
-            DispatchQueue.main.async { command = .none }
-        }
-
-        // レガシーBinding処理（過渡期）
-        if legacyShouldStartRecording {
-            coordinator.startRecording()
-            DispatchQueue.main.async {
-                legacyShouldStartRecording = false
-                legacyNavState = .recording
-            }
-        }
-
-        if legacyShouldRecordTurn {
-            coordinator.recordTurn()
-            DispatchQueue.main.async {
-                legacyShouldRecordTurn = false
-            }
-        }
-
-        if legacyShouldSaveRoute {
-            coordinator.prepareSaveRoute()
-            DispatchQueue.main.async {
-                legacyShouldSaveRoute = false
-            }
-        }
-
-        if legacyShouldReset {
-            coordinator.reset()
-            DispatchQueue.main.async {
-                legacyShouldReset = false
-            }
-        }
-
-        if let route = legacyRouteToReplay {
+        case .replay(let route):
             coordinator.replayRoute(route)
-            DispatchQueue.main.async {
-                legacyRouteToReplay = nil
-            }
+            DispatchQueue.main.async { command = .none }
         }
     }
 
@@ -163,7 +105,6 @@ struct NavARSceneView: UIViewRepresentable {
         var parent: NavARSceneView
         weak var sceneView: ARSCNView?
 
-        // 内部でARSessionServiceを使用
         private let arService = ARSessionService()
 
         init(_ parent: NavARSceneView) {
@@ -172,7 +113,7 @@ struct NavARSceneView: UIViewRepresentable {
             arService.delegate = self
         }
 
-        // MARK: - Public Methods (ARSessionServiceに委譲)
+        // MARK: - Public Methods
 
         func startRecording() {
             arService.sceneView = sceneView
@@ -189,7 +130,6 @@ struct NavARSceneView: UIViewRepresentable {
 
         func reset() {
             arService.reset()
-            updateLegacyUI(distance: 0, angle: 0, message: parent.legacyIsReady ? "準備完了" : "準備中...")
         }
 
         func replayRoute(_ route: NavRoute) {
@@ -212,20 +152,8 @@ struct NavARSceneView: UIViewRepresentable {
 
         func session(_ session: ARSession, didFailWithError error: Error) {
             DispatchQueue.main.async {
-                self.parent.legacyStatusMessage = "エラー: \(error.localizedDescription)"
-                self.parent.legacyIsReady = false
-                self.parent.callback?.arSceneDidUpdateStatus("エラー: \(error.localizedDescription)")
-                self.parent.callback?.arSceneDidChangeReadyState(false)
-            }
-        }
-
-        // MARK: - Legacy UI Update
-
-        private func updateLegacyUI(distance: Float, angle: Float, message: String) {
-            DispatchQueue.main.async {
-                self.parent.legacyCurrentDistance = distance
-                self.parent.legacyCurrentAngle = angle
-                self.parent.legacyStatusMessage = message
+                self.parent.onEvent?(.statusChanged("エラー: \(error.localizedDescription)"))
+                self.parent.onEvent?(.readyChanged(false))
             }
         }
     }
@@ -237,23 +165,19 @@ extension NavARSceneView.Coordinator: ARSessionServiceDelegate {
 
     func arSessionDidChangeReadyState(_ isReady: Bool) {
         DispatchQueue.main.async {
-            self.parent.legacyIsReady = isReady
-            self.parent.callback?.arSceneDidChangeReadyState(isReady)
+            self.parent.onEvent?(.readyChanged(isReady))
         }
     }
 
     func arSessionDidUpdateStatus(_ message: String) {
         DispatchQueue.main.async {
-            self.parent.legacyStatusMessage = message
-            self.parent.callback?.arSceneDidUpdateStatus(message)
+            self.parent.onEvent?(.statusChanged(message))
         }
     }
 
     func arSessionDidUpdateRecordingInfo(distance: Float, angle: Float) {
         DispatchQueue.main.async {
-            self.parent.legacyCurrentDistance = distance
-            self.parent.legacyCurrentAngle = angle
-            self.parent.callback?.arSceneDidUpdateRecordingInfo(distance: distance, angle: angle)
+            self.parent.onEvent?(.recordingInfoUpdated(distance: distance, angle: angle))
         }
     }
 
@@ -264,20 +188,12 @@ extension NavARSceneView.Coordinator: ARSessionServiceDelegate {
         startHeading: Float
     ) {
         DispatchQueue.main.async {
-            // レガシーBinding
-            self.parent.legacyPendingSaveItems = items
-            self.parent.legacyPendingWorldMapData = worldMapData
-            self.parent.legacyPendingStartAnchorID = startAnchorID
-            self.parent.legacyPendingStartHeading = startHeading
-            self.parent.legacySaveRequestID = UUID()
-
-            // 新しいコールバック
-            self.parent.callback?.arSceneDidPrepareSaveData(
+            self.parent.onEvent?(.saveDataReady(
                 items: items,
                 worldMapData: worldMapData,
                 startAnchorID: startAnchorID,
                 startHeading: startHeading
-            )
+            ))
         }
     }
 }

@@ -80,9 +80,9 @@ KitApp/
 - [x] Step 2.3: ARSessionService の作成（AR操作の抽出）
 
 ### Phase 3: View のリファクタリング
-- [ ] Step 3.1: ContentView を Store に接続
-- [ ] Step 3.2: ARSceneView を Store に接続
-- [ ] Step 3.3: 旧 Binding の削除
+- [x] Step 3.1: ContentView を Store に接続
+- [x] Step 3.2: ARSceneView を Store に接続
+- [x] Step 3.3: 旧 Binding の削除
 
 ### Phase 4: コンポーネント分割
 - [ ] Step 4.1: StatusBarView の抽出
