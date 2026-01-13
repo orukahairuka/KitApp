@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct KitAppApp: App {
@@ -13,5 +14,6 @@ struct KitAppApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: NavRoute.self)
     }
 }
